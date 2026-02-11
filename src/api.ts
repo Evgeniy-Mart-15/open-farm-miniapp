@@ -2,12 +2,38 @@ import type { GameState } from './gameTypes';
 
 const BASE = import.meta.env.VITE_API_URL || '';
 
+/** Ответ GET /api/me — единственный источник истины для game state (гемы, монеты, слоты). */
+export interface MeResponse {
+  id: string;
+  level: number;
+  resources: GameState['resources'];
+  crops: GameState['crops'];
+  animals: GameState['animals'];
+  referrerId?: string | null;
+  referrerUsername?: string | null;
+  username?: string | null;
+}
+
 export interface FarmStateResponse {
-  state: GameState & { referrerId?: string | null };
+  state: GameState & { referrerId?: string | null; referrerUsername?: string | null; username?: string | null };
 }
 
 export interface SyncResponse {
   state: Pick<GameState, 'level' | 'resources' | 'crops' | 'animals'>;
+}
+
+/** Запросить актуальное состояние игрока с сервера. Без этого фронт не узнает об изменении баланса после оплаты. */
+export async function getMe(userId: string): Promise<MeResponse | null> {
+  if (!BASE) return null;
+  try {
+    const res = await fetch(`${BASE}/api/me?userId=${encodeURIComponent(userId)}`, {
+      credentials: 'include'
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
 }
 
 export async function getFarm(userId: string): Promise<FarmStateResponse | null> {
@@ -24,14 +50,14 @@ export async function getFarm(userId: string): Promise<FarmStateResponse | null>
   }
 }
 
-export async function syncFarm(userId: string, state: GameState): Promise<SyncResponse | null> {
+export async function syncFarm(userId: string, state: GameState, username?: string | null): Promise<SyncResponse | null> {
   if (!BASE) return null;
   try {
     const res = await fetch(`${BASE}/api/farm/sync`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ userId, state })
+      body: JSON.stringify({ userId, state, username: username ?? undefined })
     });
     if (!res.ok) return null;
     const data = await res.json();
@@ -116,7 +142,7 @@ export interface GemPackage {
   description: string;
 }
 
-// Локальный fallback, если API не отдал пакеты (должны совпадать с бэкендом: 10/20/25 звёзд)
+// Локальный fallback, если API не отдал пакеты (должны совпадать с бэкендом).
 export const GEM_PACKAGES: GemPackage[] = [
   { id: 'gems_50', gems: 50, stars: 10, title: '50 гемов', description: '50 гемов за 10 ⭐' },
   { id: 'gems_100', gems: 100, stars: 20, title: '100 гемов', description: '100 гемов за 20 ⭐' },
@@ -170,6 +196,31 @@ export async function createCustomInvoice(userId: string, gems: number): Promise
       credentials: 'include',
       body: JSON.stringify({ userId, gems })
     });
+    // Даже если статус не 200, попытаемся прочитать тело,
+    // чтобы показать пользователю текст ошибки.
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      return (data as any) || { ok: false, error: `HTTP ${res.status}` };
+    }
+    return data as CreateInvoiceResponse;
+  } catch {
+    return null;
+  }
+}
+
+/** Подтвердить оплату из мини-аппа (после callback "paid"), чтобы гемы начислились даже если webhook не дошёл. */
+export async function confirmPaid(
+  userId: string,
+  payload: { packageId: string } | { gems: number }
+): Promise<{ ok: boolean; gems?: number } | null> {
+  if (!BASE) return null;
+  try {
+    const res = await fetch(`${BASE}/api/payments/confirm-paid`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ userId, ...payload })
+    });
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -191,6 +242,27 @@ export async function getGlobalStats(): Promise<GlobalStats | null> {
   try {
     const res = await fetch(`${BASE}/api/stats`, {
       credentials: 'include'
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function adminReward(
+  adminId: string,
+  targetUserId: string,
+  resource: 'gems' | 'coins',
+  amount: number
+): Promise<{ ok: boolean } | null> {
+  if (!BASE) return null;
+  try {
+    const res = await fetch(`${BASE}/api/admin/reward`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ adminId, targetUserId, resource, amount })
     });
     if (!res.ok) return null;
     return await res.json();

@@ -1,5 +1,5 @@
 // Очень лёгкая обёртка над Telegram WebApp API, чтобы
-// код работал и в браузере, и внутри Telegram.
+// код работал и в браузере, и внутри Telegram (iOS, Android, desktop).
 
 interface TelegramWebAppUser {
   id: number;
@@ -8,12 +8,22 @@ interface TelegramWebAppUser {
   last_name?: string;
 }
 
-interface TelegramWebApp {
+export interface InvoiceClosedEvent {
+  status?: string;
+}
+
+export interface TelegramWebApp {
   initDataUnsafe?: {
     user?: TelegramWebAppUser;
     start_param?: string;
   };
   ready: () => void;
+  openInvoice?: (url: string, callback?: (status: string) => void) => void;
+  openTelegramLink?: (url: string) => void;
+  platform?: string;
+  showAlert?: (message: string) => void;
+  onEvent?: (eventType: string, callback: (event: InvoiceClosedEvent) => void) => void;
+  offEvent?: (eventType: string, callback?: (event: InvoiceClosedEvent) => void) => void;
 }
 
 interface TelegramWindow extends Window {
@@ -24,6 +34,15 @@ interface TelegramWindow extends Window {
 
 declare const window: TelegramWindow;
 
+/** Получить объект WebApp или null (в браузере без Telegram). */
+export function getTelegramWebApp(): TelegramWebApp | null {
+  try {
+    return window.Telegram?.WebApp ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export interface TelegramContext {
   userId: string;
   username?: string;
@@ -32,21 +51,33 @@ export interface TelegramContext {
 }
 
 export function getTelegramContext(): TelegramContext {
-  const tg = window.Telegram?.WebApp;
-  if (!tg || !tg.initDataUnsafe?.user) {
-    return {
-      userId: 'DEMO_USER',
-      isTelegram: false
-    };
+  try {
+    if (typeof window === 'undefined') return { userId: 'DEMO_USER', isTelegram: false };
+    const tg = window.Telegram?.WebApp;
+    // Основной источник — Telegram WebApp initData
+    if (tg && tg.initDataUnsafe?.user) {
+      const user = tg.initDataUnsafe.user;
+      return {
+        userId: String(user.id),
+        username: user.username,
+        isTelegram: true,
+        startParam: tg.initDataUnsafe.start_param
+      };
+    }
+    // Fallback: uid из query (?uid=...) — кнопки бота с /start, /mini_app
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const uid = params.get('uid');
+      if (uid) {
+        return { userId: String(uid), isTelegram: true, startParam: undefined };
+      }
+    } catch {
+      // ignore
+    }
+    return { userId: 'DEMO_USER', isTelegram: false };
+  } catch {
+    return { userId: 'DEMO_USER', isTelegram: false };
   }
-
-  const user = tg.initDataUnsafe.user;
-  return {
-    userId: String(user.id),
-    username: user.username,
-    isTelegram: true,
-    startParam: tg.initDataUnsafe.start_param
-  };
 }
 
 export function notifyTelegramReady() {

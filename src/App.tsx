@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { GameState, TabId, CropSlot, AnimalSlot, CropType, AnimalType } from './gameTypes';
+import { createInitialState } from './initialState';
 import {
-  createInitialState,
   ensureExtendedState,
   getTimerProgress,
   isTimerReady,
@@ -18,25 +18,17 @@ import {
   getUpgradeCost,
   getBoostCost
 } from './gameLogic';
-import { getTelegramContext, notifyTelegramReady } from './telegram';
-import { getFarm, syncFarm, bindReferral, getReferralStats, claimDailyReward, createInvoice, createCustomInvoice, getGlobalStats, getGemPackages, type ReferralStats, type GlobalStats, type GemPackage, type DailyClaimResult } from './api';
+import { getTelegramContext, getTelegramWebApp, notifyTelegramReady } from './telegram';
+import { getMe, getFarm, syncFarm, bindReferral, getReferralStats, claimDailyReward, createInvoice, createCustomInvoice, confirmPaid, getGlobalStats, getGemPackages, GEM_PACKAGES, adminReward, type ReferralStats, type GlobalStats, type GemPackage, type DailyClaimResult } from './api';
 
-const STORAGE_KEY = 'farm-miniapp-state-v1';
-
-function loadState(): GameState {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return createInitialState();
-    const parsed = JSON.parse(raw) as GameState;
-    return ensureExtendedState(parsed);
-  } catch {
-    return createInitialState();
-  }
+function getStateStorageKey(userId: string) {
+  return `farm-miniapp-state-v1-${userId}`;
 }
 
-function persistState(state: GameState) {
+function persistState(state: GameState, userId: string) {
+  if (!userId) return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    window.localStorage.setItem(getStateStorageKey(userId), JSON.stringify(state));
   } catch {
     // ignore
   }
@@ -87,11 +79,15 @@ const FarmTile: React.FC<FarmTileProps> = ({
   gemUpgradeLevel,
   maxGemUpgradeLevel
 }) => {
+  const [showHint, setShowHint] = useState(false);
   const ready = isTimerReady(slot.timer);
   const progress = slot.timer ? getTimerProgress(slot.timer) : 0;
   const remaining = slot.timer ? getRemainingMs(slot.timer) : 0;
 
   const isCrop = kind === 'crop';
+  const hintText = isCrop
+    ? 'При переходе всех растений на второй уровень открывается новое растение, которое можно купить за 30 гемов.'
+    : 'При переходе всех растений на второй уровень и животных на первый и второй уровень открывается новое животное, которое можно купить за 30 гемов.';
 
   let title = '';
   let icon = '';
@@ -242,12 +238,48 @@ const FarmTile: React.FC<FarmTileProps> = ({
           </button>
         )}
         {maxGemUpgradeLevel > 0 && (
-          <span
-            style={{ fontSize: 10, color: '#9ca3af', marginLeft: 4, alignSelf: 'center', cursor: 'help' }}
-            title="Улучшение увеличивает урожай ×2 и ускоряет рост таймера. Максимум 2 уровня."
+          <button
+            type="button"
+            onClick={() => setShowHint((s) => !s)}
+            style={{
+              fontSize: 10,
+              color: '#9ca3af',
+              marginLeft: 4,
+              alignSelf: 'center',
+              width: 20,
+              height: 20,
+              minWidth: 20,
+              padding: 0,
+              borderRadius: '50%',
+              border: '1px solid rgba(148,163,184,0.5)',
+              background: 'rgba(15,23,42,0.8)',
+              cursor: 'pointer',
+              lineHeight: 1,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+            title="Подсказка"
           >
             ?
-          </span>
+          </button>
+        )}
+        {showHint && (
+          <div
+            style={{
+              marginTop: 6,
+              padding: '6px 8px',
+              fontSize: 10,
+              color: '#e2e8f0',
+              background: 'rgba(15,23,42,0.95)',
+              border: '1px solid rgba(148,163,184,0.4)',
+              borderRadius: 8,
+              width: '100%',
+              boxSizing: 'border-box'
+            }}
+          >
+            {hintText}
+          </div>
         )}
       </div>
     </div>
@@ -255,11 +287,41 @@ const FarmTile: React.FC<FarmTileProps> = ({
 };
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
+const BOT_LINK = 'https://t.me/Youdic_Bot';
+
+function isIOS(): boolean {
+  try {
+    if (typeof window === 'undefined') return false;
+    const tg = (window as any).Telegram?.WebApp;
+    if (tg?.platform === 'ios') return true;
+    return typeof navigator !== 'undefined' && /iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+  } catch {
+    return false;
+  }
+}
 
 export const App: React.FC = () => {
-  const [state, setState] = useState<GameState>(() => loadState());
+  const [telegramCtx] = useState(() => {
+    try {
+      return getTelegramContext();
+    } catch {
+      return { userId: 'DEMO_USER', isTelegram: false };
+    }
+  });
+  const [state, setState] = useState<GameState>(() => createInitialState());
+  useEffect(() => {
+    const uid = telegramCtx.userId;
+    if (!uid) return;
+    try {
+      const raw = window.localStorage.getItem(getStateStorageKey(uid));
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as GameState;
+      setState(ensureExtendedState(parsed));
+    } catch {
+      // ignore
+    }
+  }, [telegramCtx.userId]);
   const [tab, setTab] = useState<TabId>('fields');
-  const [telegramCtx] = useState(() => getTelegramContext());
   const [isAdmin] = useState<boolean>(() => {
     try {
       const params = new URLSearchParams(window.location.search);
@@ -272,8 +334,38 @@ export const App: React.FC = () => {
   const [globalStats, setGlobalStats] = useState<GlobalStats | null>(null);
   const [dailyMessage, setDailyMessage] = useState<string | null>(null);
   const [dailyInfo, setDailyInfo] = useState<DailyClaimResult | null>(null);
-  const [gemPackages, setGemPackages] = useState<GemPackage[]>([]);
+  const [gemPackages, setGemPackages] = useState<GemPackage[]>(() => GEM_PACKAGES);
+  const [adminRewardUserId, setAdminRewardUserId] = useState('');
+  const [adminRewardAmount, setAdminRewardAmount] = useState('');
+  const [adminRewardResource, setAdminRewardResource] = useState<'gems' | 'coins'>('gems');
+  const [adminRewardStatus, setAdminRewardStatus] = useState<string | null>(null);
   const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  // Единственная синхронизация: GET /api/me → setState. Оплата напрямую связана с gems на бэкенде; фронт отражает это только через refetch.
+  const syncGameState = useCallback(() => {
+    if (!API_BASE || !telegramCtx.userId) return;
+    getMe(telegramCtx.userId).then((data) => {
+      try {
+        if (!data || data.level === undefined) return;
+        const base = createInitialState();
+        const next = ensureExtendedState({
+          ...base,
+          level: data.level,
+          resources: data.resources != null ? data.resources : base.resources,
+          crops: Array.isArray(data.crops) ? data.crops : base.crops,
+          animals: Array.isArray(data.animals) ? data.animals : base.animals,
+          referrerId: data.referrerId ?? undefined,
+          referrerUsername: data.referrerUsername ?? undefined
+        });
+        setState(next);
+      } catch (_) {
+        // не ломаем приложение при некорректном ответе
+      }
+    }).catch(() => {});
+  }, [telegramCtx.userId]);
+
+  const refreshFarmState = syncGameState;
 
   type AchievementsState = {
     plantHarvests: number;
@@ -281,9 +373,10 @@ export const App: React.FC = () => {
     rewardClaimed: boolean;
   };
 
-  const loadAchievements = (): AchievementsState => {
+  const getAchievementsKey = (uid: string) => `farm-miniapp-achievements-v1-${uid}`;
+  const loadAchievements = (uid: string): AchievementsState => {
     try {
-      const raw = window.localStorage.getItem('farm-miniapp-achievements-v1');
+      const raw = window.localStorage.getItem(getAchievementsKey(uid));
       if (!raw) return { plantHarvests: 0, animalFeeds: 0, rewardClaimed: false };
       const parsed = JSON.parse(raw) as AchievementsState;
       return {
@@ -296,43 +389,61 @@ export const App: React.FC = () => {
     }
   };
 
-  const [achievements, setAchievements] = useState<AchievementsState>(() => loadAchievements());
+  const [achievements, setAchievements] = useState<AchievementsState>(() => loadAchievements(telegramCtx.userId));
 
-  const persistAchievements = (next: AchievementsState) => {
+  type WeeklyState = { harvestsThisWeek: number; coinsEarnedThisWeek: number };
+  const getWeeklyKey = (uid: string) => `farm-miniapp-weekly-v1-${uid}`;
+  const loadWeekly = (uid: string): WeeklyState => {
     try {
-      window.localStorage.setItem('farm-miniapp-achievements-v1', JSON.stringify(next));
+      const raw = window.localStorage.getItem(getWeeklyKey(uid));
+      if (!raw) return { harvestsThisWeek: 0, coinsEarnedThisWeek: 0 };
+      const p = JSON.parse(raw) as WeeklyState;
+      return { harvestsThisWeek: p.harvestsThisWeek ?? 0, coinsEarnedThisWeek: p.coinsEarnedThisWeek ?? 0 };
+    } catch {
+      return { harvestsThisWeek: 0, coinsEarnedThisWeek: 0 };
+    }
+  };
+  const [weekly, setWeekly] = useState<WeeklyState>(() => loadWeekly(telegramCtx.userId));
+
+  const persistWeekly = (w: WeeklyState, uid: string) => {
+    if (!uid) return;
+    try {
+      window.localStorage.setItem(getWeeklyKey(uid), JSON.stringify(w));
     } catch {
       // ignore
     }
   };
 
+  const persistAchievements = (next: AchievementsState, uid: string) => {
+    if (!uid) return;
+    try {
+      window.localStorage.setItem(getAchievementsKey(uid), JSON.stringify(next));
+    } catch {
+      // ignore
+    }
+  };
+
+  // Подгружаем пакеты гемов с бэкенда; при ошибке остаётся дефолтный список (GEM_PACKAGES).
   useEffect(() => {
-    if (tab === 'referrals' && API_BASE && telegramCtx.userId) {
-      getReferralStats(telegramCtx.userId).then(setReferralStats);
-      getFarm(telegramCtx.userId).then((data) => {
-        if (data?.state?.resources) {
-          setState((prev) =>
-            ensureExtendedState({
-              ...prev,
-              resources: data.state.resources,
-              crops: data.state.crops ?? prev.crops,
-              animals: data.state.animals ?? prev.animals
-            })
-          );
-        }
-      });
-    }
-    if (tab === 'stats' && API_BASE) {
-      getGlobalStats().then(setGlobalStats);
-    }
-  }, [tab, telegramCtx.userId]);
+    getGemPackages().then((list) => list.length > 0 && setGemPackages(list)).catch(() => {});
+  }, []);
 
   useEffect(() => {
-    persistState(state);
-    if (API_BASE && telegramCtx.userId) {
+    if (telegramCtx.isTelegram && tab === 'referrals' && API_BASE && telegramCtx.userId) {
+      getReferralStats(telegramCtx.userId).then(setReferralStats);
+      syncGameState();
+    }
+    if (telegramCtx.isTelegram && tab === 'stats' && API_BASE) {
+      getGlobalStats().then(setGlobalStats);
+    }
+  }, [tab, telegramCtx.userId, telegramCtx.isTelegram, syncGameState]);
+
+  useEffect(() => {
+    persistState(state, telegramCtx.userId);
+    if (API_BASE && telegramCtx.userId && telegramCtx.isTelegram) {
       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
       syncTimeoutRef.current = setTimeout(() => {
-        syncFarm(telegramCtx.userId, state).then(() => {
+        syncFarm(telegramCtx.userId, state, telegramCtx.username).then(() => {
           syncTimeoutRef.current = null;
         });
       }, 800);
@@ -340,40 +451,85 @@ export const App: React.FC = () => {
     return () => {
       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
     };
-  }, [state, telegramCtx.userId]);
+  }, [state, telegramCtx.userId, telegramCtx.isTelegram]);
 
   useEffect(() => {
     notifyTelegramReady();
 
     const sp = telegramCtx.startParam;
-    if (API_BASE && sp && sp.startsWith('ref_') && telegramCtx.userId) {
+    if (telegramCtx.isTelegram && API_BASE && sp && sp.startsWith('ref_') && telegramCtx.userId) {
       const referrerId = sp.slice(4);
       if (referrerId) bindReferral(telegramCtx.userId, referrerId);
     }
 
-    if (API_BASE && telegramCtx.userId) {
-      getFarm(telegramCtx.userId).then((data) => {
-        if (data?.state && data.state.level !== undefined) {
-          setState((prev) =>
-            ensureExtendedState({
-              ...prev,
-              level: data.state.level,
-              resources: data.state.resources,
-              crops: data.state.crops ?? [],
-              animals: data.state.animals ?? []
-            })
-          );
-        }
-      });
-      getReferralStats(telegramCtx.userId).then(setReferralStats);
-      getGemPackages().then(setGemPackages);
+    if (telegramCtx.isTelegram && API_BASE && telegramCtx.userId) {
+      syncGameState();
+      getReferralStats(telegramCtx.userId).then(setReferralStats).catch(() => {});
+      getGemPackages().then(setGemPackages).catch(() => {});
     }
 
     const id = window.setInterval(() => {
       setState((prev) => ({ ...prev }));
     }, 1000);
     return () => window.clearInterval(id);
-  }, []);
+  }, [telegramCtx.isTelegram, telegramCtx.userId, syncGameState]);
+
+  useEffect(() => {
+    if (telegramCtx.userId === 'DEMO_USER') {
+      window.location.replace(`${BOT_LINK}?start=app`);
+    }
+  }, [telegramCtx.userId]);
+
+  // При открытии вкладки «Магазин» подтягиваем баланс с сервера, чтобы гемы (Премиум) были актуальны после покупки в боте или в мини-аппе.
+  useEffect(() => {
+    if (tab !== 'shop' || !API_BASE || !telegramCtx.userId) return;
+    refreshFarmState();
+  }, [tab, API_BASE, telegramCtx.userId, refreshFarmState]);
+
+  // На вкладке «Магазин» периодически подтягиваем баланс (💎 Гемы), чтобы после оплаты в боте или в mini-app счётчик обновился.
+  useEffect(() => {
+    if (tab !== 'shop' || !API_BASE || !telegramCtx.userId) return;
+    const id = setInterval(refreshFarmState, 5000);
+    return () => clearInterval(id);
+  }, [tab, API_BASE, telegramCtx.userId, refreshFarmState]);
+
+  // При возврате в мини-ап (после оплаты) подтягиваем баланс: сразу и с задержками (сервер может обработать платёж не сразу).
+  useEffect(() => {
+    if (!API_BASE || !telegramCtx.userId || !telegramCtx.isTelegram) return;
+    const scheduleRefreshes = () => {
+      refreshFarmState();
+      refreshTimersRef.current.push(setTimeout(refreshFarmState, 1000));
+      refreshTimersRef.current.push(setTimeout(refreshFarmState, 3000));
+    };
+    let hidden = document.visibilityState === 'hidden';
+    const onVisibility = () => {
+      if (hidden && document.visibilityState === 'visible') scheduleRefreshes();
+      hidden = document.visibilityState === 'hidden';
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('focus', scheduleRefreshes);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('focus', scheduleRefreshes);
+      refreshTimersRef.current.forEach(clearTimeout);
+      refreshTimersRef.current = [];
+    };
+  }, [API_BASE, telegramCtx.userId, telegramCtx.isTelegram, refreshFarmState]);
+
+  // СВЯЗЬ ОПЛАТЫ И GEMS: invoiceClosed(paid) → getMe() → setState. Gems уже изменены сервером. Никакого setGems(gems+N), только server truth.
+  useEffect(() => {
+    const tg = getTelegramWebApp();
+    if (!tg?.onEvent || !API_BASE || !telegramCtx.userId) return;
+    const handler = (event: { status?: string }) => {
+      if (event?.status === 'paid' || event?.status === 'completed') {
+        syncGameState();
+      }
+    };
+    tg.onEvent('invoiceClosed', handler);
+    return () => {
+      if (tg.offEvent) tg.offEvent('invoiceClosed', handler);
+    };
+  }, [API_BASE, telegramCtx.userId, syncGameState]);
 
   const handlePlant = (id: string) => {
     setState((prev) => plantCrop(prev, id));
@@ -383,7 +539,7 @@ export const App: React.FC = () => {
     setState((prev) => feedAnimal(prev, id));
     setAchievements((prev) => {
       const next = { ...prev, animalFeeds: prev.animalFeeds + 1 };
-      persistAchievements(next);
+      persistAchievements(next, telegramCtx.userId);
       return next;
     });
   };
@@ -392,7 +548,12 @@ export const App: React.FC = () => {
     setState((prev) => harvestCrop(prev, id));
     setAchievements((prev) => {
       const next = { ...prev, plantHarvests: prev.plantHarvests + 1 };
-      persistAchievements(next);
+      persistAchievements(next, telegramCtx.userId);
+      return next;
+    });
+    setWeekly((w) => {
+      const next = { ...w, harvestsThisWeek: w.harvestsThisWeek + 1 };
+      persistWeekly(next, telegramCtx.userId);
       return next;
     });
   };
@@ -402,7 +563,16 @@ export const App: React.FC = () => {
   };
 
   const handleSell = () => {
-    setState((prev) => sellProduce(prev));
+    setState((prev) => {
+      const next = sellProduce(prev);
+      const income = next.resources.coins - (prev.resources?.coins ?? 0);
+      setWeekly((w) => {
+        const n = { ...w, coinsEarnedThisWeek: w.coinsEarnedThisWeek + income };
+        persistWeekly(n, telegramCtx.userId);
+        return n;
+      });
+      return next;
+    });
   };
 
   const handleBuyFeed = () => {
@@ -441,15 +611,10 @@ export const App: React.FC = () => {
       if (result.reward.coins) parts.push(`${result.reward.coins} монет`);
       if (result.reward.gems) parts.push(`${result.reward.gems} гемов`);
       if (result.reward.feed) parts.push(`${result.reward.feed} корма`);
-      setDailyMessage(`Награда: ${parts.join(', ')}. Стрик: ${result.streak ?? 1} дн.`);
+      setDailyMessage(`Награда: ${parts.join(', ')}. Марафон: день ${result.streak ?? 1} из 5.`);
       setState((prev) => ({
         ...prev,
-        resources: {
-          ...prev.resources,
-          coins: result.resources!.coins,
-          gems: result.resources!.gems,
-          feed: result.resources!.feed
-        }
+        resources: { ...prev.resources, ...result.resources }
       }));
     } else if (!result.claimed) {
       const next = result.nextAt
@@ -459,9 +624,9 @@ export const App: React.FC = () => {
     }
   };
 
-  const coins = state.resources.coins.toLocaleString('ru-RU');
-  const gems = state.resources.gems.toLocaleString('ru-RU');
-  const feed = state.resources.feed.toLocaleString('ru-RU');
+  const coins = (state.resources.coins ?? 0).toLocaleString('ru-RU');
+  const gems = (state.resources.gems ?? 0).toLocaleString('ru-RU');
+  const feed = (state.resources.feed ?? 0).toLocaleString('ru-RU');
 
   const cropsReady = state.crops.some((c) => isTimerReady(c.timer));
   const animalsReady = state.animals.some((a) => isTimerReady(a.timer));
@@ -475,16 +640,6 @@ export const App: React.FC = () => {
     } catch {
       // ignore
     }
-  };
-
-  const handleFakePurchase = (amountGems: number) => {
-    setState((prev) => ({
-      ...prev,
-      resources: {
-        ...prev.resources,
-        gems: prev.resources.gems + amountGems
-      }
-    }));
   };
 
   // Проверка условий разблокировки слотов
@@ -661,41 +816,116 @@ export const App: React.FC = () => {
     });
   };
 
+  const COINS_TO_GEMS_COST = 100_000;
+  const COINS_TO_GEMS_AMOUNT = 10_000;
+  // Обмен монет на гемы внутри игры (не Telegram Stars). Оплата Stars → только через бэкенд + refetch.
+  const handleExchangeCoinsToGems = () => {
+    setState((prev) => {
+      if ((prev.resources.coins ?? 0) < COINS_TO_GEMS_COST) return prev;
+      return {
+        ...prev,
+        resources: {
+          ...prev.resources,
+          coins: (prev.resources.coins ?? 0) - COINS_TO_GEMS_COST,
+          gems: (prev.resources.gems ?? 0) + COINS_TO_GEMS_AMOUNT
+        }
+      };
+    });
+  };
+
   const [buyingPackage, setBuyingPackage] = useState<string | null>(null);
   const [customGems, setCustomGems] = useState<string>('');
   const [customBuying, setCustomBuying] = useState<boolean>(false);
+  /** Последняя попытка покупки — для кнопки «Я оплатил», если callback openInvoice не сработал */
+  const [pendingPaymentConfirm, setPendingPaymentConfirm] = useState<{ packageId: string } | { gems: number } | null>(null);
+
+  const getCustomUsernameKey = (uid: string) => `farm-miniapp-custom-username-v1-${uid}`;
+  const [customUsername, setCustomUsername] = useState<string>(() => {
+    try {
+      return window.localStorage.getItem(getCustomUsernameKey(telegramCtx.userId)) || '';
+    } catch {
+      return '';
+    }
+  });
+  const [editingUsername, setEditingUsername] = useState(false);
+  const [usernameInput, setUsernameInput] = useState('');
+
+  const schedulePaymentRefreshes = useCallback(() => {
+    refreshFarmState();
+    setTimeout(refreshFarmState, 1000);
+    setTimeout(refreshFarmState, 2500);
+    setTimeout(refreshFarmState, 5000);
+    setTimeout(refreshFarmState, 10000);
+    setTimeout(refreshFarmState, 20000);
+  }, [refreshFarmState]);
 
   const handleBuyGems = async (packageId: string) => {
     if (!telegramCtx.userId || !API_BASE) {
       alert('Покупка доступна только в Telegram');
       return;
     }
-    
     setBuyingPackage(packageId);
     try {
       const result = await createInvoice(telegramCtx.userId, packageId);
-      if (result?.invoiceLink) {
-        // Открываем invoice через Telegram WebApp API
-        const tg = (window as any).Telegram?.WebApp;
-        if (tg?.openInvoice) {
-          tg.openInvoice(result.invoiceLink, (status: string) => {
-            if (status === 'paid') {
-              // Обновляем баланс после оплаты
-              getFarm(telegramCtx.userId).then((data) => {
-                if (data?.state?.resources) {
-                  setState((prev) => ({ ...prev, resources: data.state.resources }));
-                }
-              });
-            }
-          });
-        } else {
-          // Fallback — открываем ссылку в новой вкладке
-          window.open(result.invoiceLink, '_blank');
-        }
-      } else {
+      if (!result?.invoiceLink) {
         alert('Не удалось создать платёж');
+        return;
       }
-    } catch (e) {
+      const tg = getTelegramWebApp();
+      const doRefresh = () => {
+        try {
+          schedulePaymentRefreshes();
+        } catch (_) {
+          refreshFarmState();
+        }
+      };
+      // Критично для прогресса: после оплаты гемы приходят ТОЛЬКО с сервера. Refetch → setState(serverState) → UI и игровая логика (слоты, апгрейды) пересчитываются.
+      const onPaid = () => {
+        setPendingPaymentConfirm({ packageId });
+        const refetchBalanceFromServer = () => {
+          refreshFarmState();
+          setTimeout(refreshFarmState, 400);
+          schedulePaymentRefreshes();
+        };
+        if (telegramCtx.userId && API_BASE) {
+          confirmPaid(telegramCtx.userId, { packageId })
+            .then((r) => {
+              if (r?.ok) {
+                setPendingPaymentConfirm(null);
+                refetchBalanceFromServer();
+                return;
+              }
+              setTimeout(() => confirmPaid(telegramCtx.userId!, { packageId }).then((r2) => { if (r2?.ok) setPendingPaymentConfirm(null); refetchBalanceFromServer(); }), 1500);
+            })
+            .catch(() => {
+              setTimeout(() => confirmPaid(telegramCtx.userId!, { packageId }).then((r2) => { if (r2?.ok) setPendingPaymentConfirm(null); refetchBalanceFromServer(); }), 1500);
+            });
+        } else {
+          refetchBalanceFromServer();
+        }
+      };
+      const isPaid = (s: unknown) => (s === 'paid' || s === 'completed') || (typeof s === 'object' && s !== null && (s as { status?: string }).status === 'paid');
+      if (tg?.openInvoice) {
+        try {
+          tg.openInvoice(result.invoiceLink, (status: string | { status?: string }) => {
+            const statusStr = typeof status === 'object' && status !== null && 'status' in status ? (status as { status: string }).status : String(status);
+            if (isPaid(statusStr) || isPaid(status)) onPaid();
+          });
+        } catch (_) {}
+        doRefresh();
+      } else if (tg?.openTelegramLink) {
+        try {
+          tg.openTelegramLink(result.invoiceLink);
+          if (tg.platform === 'ios' && tg.showAlert) {
+            tg.showAlert('Если окно оплаты не открылось — нажмите внизу «Открыть бота для оплаты», затем в чате введите /donate и выберите пакет.');
+          }
+        } catch (_) {}
+        doRefresh();
+      } else {
+        window.open(result.invoiceLink, '_blank');
+        doRefresh();
+      }
+    } catch (_) {
       alert('Ошибка при создании платежа');
     } finally {
       setBuyingPackage(null);
@@ -710,31 +940,70 @@ export const App: React.FC = () => {
       alert('Покупка доступна только в Telegram');
       return;
     }
-    if (!parsedCustomGems || parsedCustomGems <= 0) {
-      return;
-    }
+    if (!parsedCustomGems || parsedCustomGems <= 0) return;
     setCustomBuying(true);
     try {
       const result = await createCustomInvoice(telegramCtx.userId, parsedCustomGems);
-      if (result?.invoiceLink) {
-        const tg = (window as any).Telegram?.WebApp;
-        if (tg?.openInvoice) {
-          tg.openInvoice(result.invoiceLink, (status: string) => {
-            if (status === 'paid') {
-              getFarm(telegramCtx.userId).then((data) => {
-                if (data?.state?.resources) {
-                  setState((prev) => ({ ...prev, resources: data.state.resources }));
-                }
-              });
-            }
-          });
-        } else {
-          window.open(result.invoiceLink, '_blank');
-        }
-      } else {
-        alert('Не удалось создать платёж');
+      if (!result?.invoiceLink) {
+        const errMsg = (result as { error?: string })?.error || 'Не удалось создать платёж';
+        alert(errMsg);
+        return;
       }
-    } catch (e) {
+      const tg = getTelegramWebApp();
+      const doRefresh = () => {
+        try {
+          schedulePaymentRefreshes();
+        } catch (_) {
+          refreshFarmState();
+        }
+      };
+      // Та же критичная логика: после оплаты своей суммы — confirm, refetch, state только с сервера → слоты/апгрейды обновляются.
+      const onPaid = () => {
+        setPendingPaymentConfirm({ gems: parsedCustomGems });
+        const refetchBalanceFromServer = () => {
+          refreshFarmState();
+          setTimeout(refreshFarmState, 400);
+          schedulePaymentRefreshes();
+        };
+        if (telegramCtx.userId && API_BASE) {
+          confirmPaid(telegramCtx.userId, { gems: parsedCustomGems })
+            .then((r) => {
+              if (r?.ok) {
+                setPendingPaymentConfirm(null);
+                refetchBalanceFromServer();
+                return;
+              }
+              setTimeout(() => confirmPaid(telegramCtx.userId!, { gems: parsedCustomGems }).then((r2) => { if (r2?.ok) setPendingPaymentConfirm(null); refetchBalanceFromServer(); }), 1500);
+            })
+            .catch(() => {
+              setTimeout(() => confirmPaid(telegramCtx.userId!, { gems: parsedCustomGems }).then((r2) => { if (r2?.ok) setPendingPaymentConfirm(null); refetchBalanceFromServer(); }), 1500);
+            });
+        } else {
+          refetchBalanceFromServer();
+        }
+      };
+      const isPaid = (s: unknown) => (s === 'paid' || s === 'completed') || (typeof s === 'object' && s !== null && (s as { status?: string }).status === 'paid');
+      if (tg?.openInvoice) {
+        try {
+          tg.openInvoice(result.invoiceLink, (status: string | { status?: string }) => {
+            const statusStr = typeof status === 'object' && status !== null && 'status' in status ? (status as { status: string }).status : String(status);
+            if (isPaid(statusStr) || isPaid(status)) onPaid();
+          });
+        } catch (_) {}
+        doRefresh();
+      } else if (tg?.openTelegramLink) {
+        try {
+          tg.openTelegramLink(result.invoiceLink);
+          if (tg.platform === 'ios' && tg.showAlert) {
+            tg.showAlert('Если окно оплаты не открылось — нажмите внизу «Открыть бота для оплаты», затем в чате введите /donate и выберите свою сумму.');
+          }
+        } catch (_) {}
+        doRefresh();
+      } else {
+        window.open(result.invoiceLink, '_blank');
+        doRefresh();
+      }
+    } catch (_) {
       alert('Ошибка при создании платежа');
     } finally {
       setCustomBuying(false);
@@ -744,6 +1013,26 @@ export const App: React.FC = () => {
   const canClaimAchievement =
     achievements.plantHarvests >= 10 && achievements.animalFeeds >= 5 && !achievements.rewardClaimed;
 
+  const WEEKLY_HARVEST_GOAL = 100;
+  const WEEKLY_COINS_GOAL = 1000;
+  const WEEKLY_REWARD_COINS = 200;
+  const canClaimWeekly =
+    weekly.harvestsThisWeek >= WEEKLY_HARVEST_GOAL && weekly.coinsEarnedThisWeek >= WEEKLY_COINS_GOAL;
+
+  const handleClaimWeeklyReward = () => {
+    if (!canClaimWeekly) return;
+    setState((prev) => ({
+      ...prev,
+      resources: {
+        ...prev.resources,
+        coins: (prev.resources.coins ?? 0) + WEEKLY_REWARD_COINS
+      }
+    }));
+    const reset = { harvestsThisWeek: 0, coinsEarnedThisWeek: 0 };
+    persistWeekly(reset, telegramCtx.userId);
+    setWeekly(reset);
+  };
+
   const handleClaimAchievementReward = () => {
     if (!canClaimAchievement) return;
     const rewardCoins = 100;
@@ -751,15 +1040,25 @@ export const App: React.FC = () => {
       ...prev,
       resources: {
         ...prev.resources,
-        coins: prev.resources.coins + rewardCoins
+        coins: (prev.resources.coins ?? 0) + rewardCoins
       }
     }));
     setAchievements((prev) => {
       const next = { ...prev, rewardClaimed: true };
-      persistAchievements(next);
+      persistAchievements(next, telegramCtx.userId);
       return next;
     });
   };
+
+  if (telegramCtx.userId === 'DEMO_USER') {
+    return (
+      <div className="app-root">
+        <div className="card" style={{ padding: 24, textAlign: 'center' }}>
+          <div style={{ fontSize: 18 }}>Открываем…</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app-root">
@@ -767,7 +1066,9 @@ export const App: React.FC = () => {
         <div className="card-header">
           <div>
             <div className="title">Томатная ферма</div>
-            <div className="subtitle">Мини‑апп для Telegram · Ур. {state.level}</div>
+            <div className="subtitle">
+              {telegramCtx.username ? `@${telegramCtx.username}` : 'Мини‑апп'} · Ур. {state.level}
+            </div>
           </div>
           <div style={{ fontSize: 18 }}>🚜</div>
         </div>
@@ -778,7 +1079,7 @@ export const App: React.FC = () => {
             <span className="pill-value">🪙 {coins}</span>
           </div>
           <div className="pill secondary">
-            <span className="pill-label">Премиум</span>
+            <span className="pill-label">Гемы</span>
             <span className="pill-value">💎 {gems}</span>
           </div>
           <div className="pill secondary">
@@ -842,7 +1143,7 @@ export const App: React.FC = () => {
               </div>
             </div>
             <div className="grid">
-              {state.crops.map((crop) => {
+              {(state.crops ?? []).map((crop) => {
                 if (crop.unlocked === false) {
                   const canUnlock = canUnlockCrop(crop.type, state);
                   const titleMap: Record<CropType, string> = {
@@ -924,7 +1225,7 @@ export const App: React.FC = () => {
               </div>
             </div>
             <div className="grid">
-              {state.animals.map((animal) => {
+              {(state.animals ?? []).map((animal) => {
                 if (animal.unlocked === false) {
                   const canUnlock = canUnlockAnimal(animal.type, state);
                   const titleMap: Record<AnimalType, string> = {
@@ -1049,7 +1350,7 @@ export const App: React.FC = () => {
                 )}
                 {dailyInfo?.streak && (
                   <div style={{ fontSize: 10, color: '#6b7280', marginBottom: 6 }}>
-                    Серия: {dailyInfo.streak} дней (цикл наград 7 дней)
+                    Марафон: день {dailyInfo.streak} из 5 (день 1: 20🪙+5🥣, 2: 30+5, 3: 40+5, 4: 50+5, 5: 100💎+20🥣)
                   </div>
                 )}
               </>
@@ -1074,9 +1375,18 @@ export const App: React.FC = () => {
               className="btn btn-secondary"
               onClick={handleExchangeGemsToCoins}
               style={{ marginTop: 6 }}
-              disabled={state.resources.gems < 10}
+              disabled={(state.resources.gems ?? 0) < 10}
             >
               Обменять 10 💎 на 100 🪙
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleExchangeCoinsToGems}
+              style={{ marginTop: 6 }}
+              disabled={(state.resources.coins ?? 0) < 100000}
+            >
+              Обменять 100 000 🪙 на 10 000 💎
             </button>
             {/* Тестовые подписи больше не показываем — на рынке уже финальная логика */}
           </>
@@ -1096,10 +1406,137 @@ export const App: React.FC = () => {
                 <span>Награда: <strong>{referralStats.rewardsGems} 💎</strong></span>
               </div>
             )}
-            <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 8 }}>
-              Твой ID: <strong style={{ color: '#e5e7eb' }}>{telegramCtx.userId}</strong>
-              {telegramCtx.isTelegram ? ' (Telegram)' : ' (демо)'}
+            <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <span>Твой юзернейм:</span>
+              {editingUsername ? (
+                <>
+                  <input
+                    type="text"
+                    value={usernameInput}
+                    onChange={(e) => setUsernameInput(e.target.value)}
+                    placeholder="Введи юзернейм"
+                    style={{
+                      flex: 1,
+                      minWidth: 120,
+                      padding: '6px 10px',
+                      borderRadius: 8,
+                      border: '1px solid rgba(148,163,184,0.5)',
+                      background: 'rgba(15,23,42,0.9)',
+                      color: '#e5e7eb',
+                      fontSize: 12
+                    }}
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => {
+                      const v = usernameInput.trim();
+                      try {
+                        if (v) window.localStorage.setItem(getCustomUsernameKey(telegramCtx.userId), v);
+                        else window.localStorage.removeItem(getCustomUsernameKey(telegramCtx.userId));
+                      } catch {}
+                      setCustomUsername(v);
+                      setEditingUsername(false);
+                    }}
+                    style={{ fontSize: 12, padding: '6px 12px' }}
+                  >
+                    OK
+                  </button>
+                </>
+              ) : (
+                <>
+                  <strong style={{ color: '#e5e7eb' }}>
+                    {customUsername ? `@${customUsername.replace(/^@/, '')}` : (telegramCtx.username ? `@${telegramCtx.username}` : '—')}
+                  </strong>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUsernameInput(customUsername || telegramCtx.username || '');
+                      setEditingUsername(true);
+                    }}
+                    title="Изменить юзернейм"
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: '50%',
+                      border: '1px solid rgba(148,163,184,0.5)',
+                      background: 'rgba(30,41,59,0.8)',
+                      color: '#94a3b8',
+                      fontSize: 14,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      padding: 0
+                    }}
+                  >
+                    ✏️
+                  </button>
+                </>
+              )}
             </div>
+            {state.referrerId && (
+              <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 8 }}>
+                Вас пригласил: <strong style={{ color: '#e5e7eb' }}>{state.referrerUsername ? `@${state.referrerUsername}` : 'пользователь'}</strong>
+              </div>
+            )}
+            {isAdmin && (
+              <div style={{ marginTop: 12, padding: 8, borderRadius: 8, border: '1px dashed rgba(148,163,184,0.6)', background: 'rgba(15,23,42,0.8)' }}>
+                <div style={{ fontSize: 11, color: '#f97316', marginBottom: 4 }}>Админ: разовая награда игроку</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <input
+                    type="text"
+                    placeholder="ID игрока (userId)"
+                    value={adminRewardUserId}
+                    onChange={(e) => setAdminRewardUserId(e.target.value)}
+                    style={{ padding: '6px 8px', borderRadius: 6, border: '1px solid rgba(148,163,184,0.6)', fontSize: 12, background: 'rgba(15,23,42,0.9)', color: '#e5e7eb' }}
+                  />
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <input
+                      type="number"
+                      min={1}
+                      placeholder="Количество"
+                      value={adminRewardAmount}
+                      onChange={(e) => setAdminRewardAmount(e.target.value)}
+                      style={{ flex: 1, padding: '6px 8px', borderRadius: 6, border: '1px solid rgba(148,163,184,0.6)', fontSize: 12, background: 'rgba(15,23,42,0.9)', color: '#e5e7eb' }}
+                    />
+                    <select
+                      value={adminRewardResource}
+                      onChange={(e) => setAdminRewardResource(e.target.value as 'gems' | 'coins')}
+                      style={{ padding: '6px 8px', borderRadius: 6, border: '1px solid rgba(148,163,184,0.6)', fontSize: 12, background: 'rgba(15,23,42,0.9)', color: '#e5e7eb' }}
+                    >
+                      <option value="gems">💎 Гемы</option>
+                      <option value="coins">🪙 Монеты</option>
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ fontSize: 12, padding: '6px 10px' }}
+                    onClick={async () => {
+                      const amt = Math.floor(Number(adminRewardAmount || '0'));
+                      if (!adminRewardUserId.trim() || !amt || amt <= 0) {
+                        setAdminRewardStatus('Укажи ID игрока и положительное число.');
+                        return;
+                      }
+                      setAdminRewardStatus('Отправляю награду…');
+                      const res = await adminReward(telegramCtx.userId, adminRewardUserId.trim(), adminRewardResource, amt);
+                      if (res?.ok) {
+                        setAdminRewardStatus('Награда отправлена.');
+                      } else {
+                        setAdminRewardStatus('Ошибка при отправке награды.');
+                      }
+                    }}
+                  >
+                    Начислить {adminRewardAmount || '?'} {adminRewardResource === 'gems' ? '💎' : '🪙'}
+                  </button>
+                  {adminRewardStatus && (
+                    <div style={{ fontSize: 10, color: '#9ca3af' }}>{adminRewardStatus}</div>
+                  )}
+                </div>
+              </div>
+            )}
             <div
               style={{
                 fontSize: 11,
@@ -1152,6 +1589,91 @@ export const App: React.FC = () => {
                 Покупай гемы за Telegram Stars ⭐
               </div>
             </div>
+            {telegramCtx.isTelegram && !API_BASE && (
+              <div style={{ padding: 10, marginBottom: 10, borderRadius: 10, background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.5)', fontSize: 12 }}>
+                ⚠️ Сервер не подключён — гемы не сохранятся. В Cloudflare Pages → Settings → Environment variables добавь <strong>VITE_API_URL</strong> = <code style={{ fontSize: 11 }}>https://open-farm-1.onrender.com</code>, затем пересобери и задеплой проект.
+              </div>
+            )}
+            {pendingPaymentConfirm && API_BASE && telegramCtx.userId && (
+              <div style={{ padding: 10, marginBottom: 10, borderRadius: 10, background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.5)', fontSize: 12 }}>
+                <div style={{ marginBottom: 6 }}>Оплатили, но гемы не пришли? Нажмите — начислим по последней покупке:</div>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={async () => {
+                    const payload = pendingPaymentConfirm;
+                    if (!payload) return;
+                    const r = 'packageId' in payload
+                      ? await confirmPaid(telegramCtx.userId!, { packageId: payload.packageId })
+                      : await confirmPaid(telegramCtx.userId!, { gems: payload.gems });
+                    if (r?.ok) {
+                      setPendingPaymentConfirm(null);
+                      refreshFarmState();
+                      setTimeout(refreshFarmState, 400);
+                      if (typeof (window as any).Telegram?.WebApp?.showAlert === 'function') {
+                        (window as any).Telegram.WebApp.showAlert('Гемы начислены. Баланс обновлён.');
+                      } else {
+                        alert('Гемы начислены.');
+                      }
+                    } else {
+                      if (typeof (window as any).Telegram?.WebApp?.showAlert === 'function') {
+                        (window as any).Telegram.WebApp.showAlert('Не удалось начислить. Попробуйте ещё раз.');
+                      } else {
+                        alert('Не удалось начислить.');
+                      }
+                    }
+                  }}
+                  style={{ fontSize: 12 }}
+                >
+                  Я оплатил — начислить гемы
+                </button>
+              </div>
+            )}
+            {isAdmin && API_BASE && telegramCtx.userId && (
+              <div style={{ marginBottom: 8 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={async () => {
+                    const show = (msg: string) => {
+                      if (typeof (window as any).Telegram?.WebApp?.showAlert === 'function') {
+                        (window as any).Telegram.WebApp.showAlert(msg);
+                      } else {
+                        alert(msg);
+                      }
+                    };
+                    const uiGems = state.resources.gems ?? 0;
+                    let msg = `userId: ${telegramCtx.userId}\nAPI: ${API_BASE}\nUI gems: ${uiGems}\n`;
+                    try {
+                      const healthRes = await fetch(`${API_BASE}/health`, { credentials: 'include' });
+                      msg += `health: ${healthRes.status}\n`;
+                      if (!healthRes.ok) {
+                        show(msg);
+                        return;
+                      }
+                      const meRes = await fetch(`${API_BASE}/api/me?userId=${encodeURIComponent(telegramCtx.userId!)}`, {
+                        credentials: 'include'
+                      });
+                      msg += `api/me: ${meRes.status}\n`;
+                      if (!meRes.ok) {
+                        show(msg);
+                        return;
+                      }
+                      const data = await meRes.json();
+                      const serverGems = data?.resources?.gems ?? 0;
+                      msg += `server gems: ${serverGems}\n`;
+                      show(msg);
+                    } catch (e: any) {
+                      msg += `error: ${e?.message || String(e)}`;
+                      show(msg);
+                    }
+                  }}
+                  style={{ fontSize: 12 }}
+                >
+                  Диагностика оплаты (admin)
+                </button>
+              </div>
+            )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {gemPackages.map((pkg) => (
                 <div
@@ -1229,25 +1751,38 @@ export const App: React.FC = () => {
                 </button>
               </div>
 
-              {!telegramCtx.isTelegram && (
+              {/* На iPhone при открытии из меню оплата часто не открывается — даём переход в бота */}
+              {isIOS() && (
                 <div
                   style={{
-                    padding: 8,
+                    padding: 10,
                     borderRadius: 14,
-                    background: 'radial-gradient(circle at top, #0f172a 0, #020617 60%)',
-                    border: '1px solid rgba(148,163,184,0.5)',
-                    fontSize: 11,
-                    color: '#9ca3af'
+                    background: 'rgba(59,130,246,0.15)',
+                    border: '1px solid rgba(59,130,246,0.5)',
+                    fontSize: 12,
+                    color: '#e5e7eb'
                   }}
                 >
-                  Демо-режим: покупка Stars работает только в Telegram.
+                  <div style={{ marginBottom: 8 }}>
+                    На iPhone оплата из мини-приложения может не открываться. Нажмите кнопку ниже — откроется чат с ботом (мини-приложение закроется). В чате введите <strong>/donate</strong> и выберите пакет или «Своя сумма».
+                  </div>
                   <button
                     type="button"
-                    className="btn btn-secondary"
-                    onClick={() => handleFakePurchase(50)}
-                    style={{ marginTop: 6 }}
+                    className="btn btn-primary"
+                    onClick={() => {
+                      const tg = (window as any).Telegram?.WebApp;
+                      if (tg?.openTelegramLink) {
+                        tg.openTelegramLink(BOT_LINK);
+                        setTimeout(() => tg?.close?.(), 400);
+                      } else if (tg?.openLink) {
+                        tg.openLink(BOT_LINK);
+                        setTimeout(() => tg?.close?.(), 400);
+                      } else {
+                        window.location.href = BOT_LINK;
+                      }
+                    }}
                   >
-                    Тестово добавить 50 💎
+                    Открыть бота для оплаты
                   </button>
                 </div>
               )}
@@ -1276,56 +1811,46 @@ export const App: React.FC = () => {
               }}
             >
               <div style={{ marginBottom: 8, fontWeight: 600 }}>Твоя ферма</div>
-              {(() => {
-                const harvestTotal =
-                  (state.resources.tomato ?? 0) +
-                  (state.resources.cucumber ?? 0) +
-                  (state.resources.corn ?? 0) +
-                  (state.resources.watermelon ?? 0) +
-                  (state.resources.apple ?? 0) +
-                  (state.resources.milk ?? 0) +
-                  (state.resources.egg ?? 0) +
-                  (state.resources.cheese ?? 0) +
-                  (state.resources.meat ?? 0) +
-                  (state.resources.feathers ?? 0) +
-                  (state.resources.wool ?? 0);
-                const harvestGoal = 100;
-                const coinsGoal = 1000;
-                const harvestProgress = Math.min(1, harvestTotal / harvestGoal);
-                const coinsProgress = Math.min(1, state.resources.coins / coinsGoal);
-                return (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <div>
-                      <div style={{ color: '#9ca3af', fontSize: 11 }}>
-                        Собрано урожая за неделю (цель {harvestGoal})
-                      </div>
-                      <div style={{ fontSize: 16, fontWeight: 600 }}>
-                        {harvestTotal.toLocaleString('ru-RU')}
-                      </div>
-                      <div className="progress-bar">
-                        <div
-                          className="progress-fill"
-                          style={{ width: `${harvestProgress * 100}%` }}
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <div style={{ color: '#9ca3af', fontSize: 11 }}>
-                        Заработано монет за неделю (цель {coinsGoal})
-                      </div>
-                      <div style={{ fontSize: 16, fontWeight: 600 }}>
-                        {state.resources.coins.toLocaleString('ru-RU')}
-                      </div>
-                      <div className="progress-bar">
-                        <div
-                          className="progress-fill"
-                          style={{ width: `${coinsProgress * 100}%` }}
-                        />
-                      </div>
-                    </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div>
+                  <div style={{ color: '#9ca3af', fontSize: 11 }}>
+                    Собрано урожая за неделю (цель {WEEKLY_HARVEST_GOAL})
                   </div>
-                );
-              })()}
+                  <div style={{ fontSize: 16, fontWeight: 600 }}>
+                    {weekly.harvestsThisWeek.toLocaleString('ru-RU')}
+                  </div>
+                  <div className="progress-bar">
+                    <div
+                      className="progress-fill"
+                      style={{ width: `${Math.min(1, weekly.harvestsThisWeek / WEEKLY_HARVEST_GOAL) * 100}%` }}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: '#9ca3af', fontSize: 11 }}>
+                    Заработано монет за неделю (цель {WEEKLY_COINS_GOAL})
+                  </div>
+                  <div style={{ fontSize: 16, fontWeight: 600 }}>
+                    {weekly.coinsEarnedThisWeek.toLocaleString('ru-RU')}
+                  </div>
+                  <div className="progress-bar">
+                    <div
+                      className="progress-fill"
+                      style={{ width: `${Math.min(1, weekly.coinsEarnedThisWeek / WEEKLY_COINS_GOAL) * 100}%` }}
+                    />
+                  </div>
+                </div>
+                {canClaimWeekly && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={handleClaimWeeklyReward}
+                    style={{ marginTop: 4 }}
+                  >
+                    Забрать {WEEKLY_REWARD_COINS} монет (цикл сбросится)
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Маленькая цель / достижение */}

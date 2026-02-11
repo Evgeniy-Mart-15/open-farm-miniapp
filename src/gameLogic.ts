@@ -1,4 +1,5 @@
 import type { GameState, CropType, AnimalType, TimerState } from './gameTypes';
+import { createInitialState } from './initialState';
 
 const MINUTE = 60 * 1000;
 
@@ -19,159 +20,6 @@ export function getTimerProgress(timer: TimerState | null): number {
 export function isTimerReady(timer: TimerState | null): boolean {
   if (!timer) return false;
   return Date.now() - timer.startedAt >= timer.durationMs;
-}
-
-export function createInitialState(): GameState {
-  const crops = [
-    {
-      id: 'c1',
-      type: 'tomato' as CropType,
-      level: 1,
-      baseYield: 3,
-      timer: null,
-      harvestsSinceLevel: 0,
-      gemUpgradeLevel: 0,
-      unlocked: true
-    },
-    {
-      id: 'c2',
-      type: 'cucumber' as CropType,
-      level: 1,
-      baseYield: 2,
-      timer: null,
-      harvestsSinceLevel: 0,
-      gemUpgradeLevel: 0,
-      unlocked: true
-    },
-    {
-      id: 'c3',
-      type: 'tomato' as CropType,
-      level: 1,
-      baseYield: 2,
-      timer: null,
-      harvestsSinceLevel: 0,
-      gemUpgradeLevel: 0,
-      unlocked: true
-    },
-    // Будущие слоты: кукуруза, арбуз, яблоко — изначально заблокированы
-    {
-      id: 'c4',
-      type: 'corn' as CropType,
-      level: 1,
-      baseYield: 3,
-      timer: null,
-      harvestsSinceLevel: 0,
-      gemUpgradeLevel: 0,
-      unlocked: false
-    },
-    {
-      id: 'c5',
-      type: 'watermelon' as CropType,
-      level: 1,
-      baseYield: 4,
-      timer: null,
-      harvestsSinceLevel: 0,
-      gemUpgradeLevel: 0,
-      unlocked: false
-    },
-    {
-      id: 'c6',
-      type: 'apple' as CropType,
-      level: 1,
-      baseYield: 5,
-      timer: null,
-      harvestsSinceLevel: 0,
-      gemUpgradeLevel: 0,
-      unlocked: false
-    }
-  ];
-
-  const animals = [
-    {
-      id: 'a1',
-      type: 'cow' as AnimalType,
-      level: 1,
-      baseYield: 1,
-      timer: null,
-      harvestsSinceLevel: 0,
-      gemUpgradeLevel: 0,
-      unlocked: true
-    },
-    {
-      id: 'a2',
-      type: 'chicken' as AnimalType,
-      level: 1,
-      baseYield: 1,
-      timer: null,
-      harvestsSinceLevel: 0,
-      gemUpgradeLevel: 0,
-      unlocked: true
-    },
-    {
-      id: 'a3',
-      type: 'goat' as AnimalType,
-      level: 1,
-      baseYield: 1,
-      timer: null,
-      harvestsSinceLevel: 0,
-      gemUpgradeLevel: 0,
-      unlocked: false
-    },
-    {
-      id: 'a4',
-      type: 'sheep' as AnimalType,
-      level: 1,
-      baseYield: 1,
-      timer: null,
-      harvestsSinceLevel: 0,
-      gemUpgradeLevel: 0,
-      unlocked: false
-    },
-    {
-      id: 'a5',
-      type: 'pig' as AnimalType,
-      level: 1,
-      baseYield: 1,
-      timer: null,
-      harvestsSinceLevel: 0,
-      gemUpgradeLevel: 0,
-      unlocked: false
-    },
-    {
-      id: 'a6',
-      type: 'goose' as AnimalType,
-      level: 1,
-      baseYield: 1,
-      timer: null,
-      harvestsSinceLevel: 0,
-      gemUpgradeLevel: 0,
-      unlocked: false
-    }
-  ];
-
-  const state: GameState = {
-    level: 1,
-    resources: {
-      coins: 100,
-      gems: 5,
-      tomato: 0,
-      cucumber: 0,
-      corn: 0,
-      watermelon: 0,
-      apple: 0,
-      milk: 0,
-      egg: 0,
-      cheese: 0,
-      meat: 0,
-      feathers: 0,
-      wool: 0,
-      feed: 5
-    },
-    crops,
-    animals
-  };
-
-  return state;
 }
 
 // Нормализуем ресурсы: все поля из эталона присутствуют, отсутствующие = 0
@@ -201,9 +49,11 @@ function normalizeResources(resources: GameState['resources'] | undefined): Game
 // Дополнительно гарантируем, что в состоянии есть все новые слоты и ресурсы
 export function ensureExtendedState(state: GameState): GameState {
   const base = createInitialState();
+  const safeCrops = Array.isArray(state.crops) ? state.crops.filter((c) => c != null && typeof c === 'object' && c.id != null) : base.crops;
+  const safeAnimals = Array.isArray(state.animals) ? state.animals.filter((a) => a != null && typeof a === 'object' && a.id != null) : base.animals;
 
-  const cropsById = new Map(state.crops.map((c) => [c.id, c]));
-  const animalsById = new Map(state.animals.map((a) => [a.id, a]));
+  const cropsById = new Map(safeCrops.map((c) => [c.id, c]));
+  const animalsById = new Map(safeAnimals.map((a) => [a.id, a]));
 
   const crops = base.crops.map((tpl) => {
     const existing = cropsById.get(tpl.id);
@@ -442,18 +292,20 @@ export function sellProduce(state: GameState): GameState {
     feathers,
     wool
   } = state.resources;
+  // Цены продажи урожая: база +25% (ранее было +15%, теперь ещё +10%), округление до целого
+  const price = (base: number) => Math.round(base * 1.25);
   const income =
-    tomato * 3 +   // 2.55 → 3
-    cucumber * 4 + // 3.4  → 4
-    corn * 5 +     // 4.25 → 5
-    watermelon * 6 + // 7 * 0.85 = 5.95 → 6
-    apple * 6 +    // 5.1  → 6
-    milk * 9 +     // 10 * 0.85 = 8.5 → 9
-    egg * 6 +      // 5.1  → 6
-    cheese * 11 +  // 10.2 → 11
-    meat * 13 +    // 12.75→ 13
-    feathers * 4 + // 3.4  → 4
-    wool * 7;      // 6.8  → 7
+    tomato * price(3) +
+    cucumber * price(4) +
+    corn * price(5) +
+    watermelon * price(6) +
+    apple * price(6) +
+    milk * price(9) +
+    egg * price(6) +
+    cheese * price(11) +
+    meat * price(13) +
+    feathers * price(4) +
+    wool * price(7);
 
   if (income === 0) return state;
 
