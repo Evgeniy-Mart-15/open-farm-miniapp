@@ -179,108 +179,140 @@ const FarmTile: React.FC<FarmTileProps> = ({
 
   return (
     <div className={`tile ${isCrop ? 'vegetable' : 'animal'}`}>
-      <div className="tile-header">
-        <span className="tile-name">
-          {title}
-        </span>
-        <span className="tile-level">Ур. {slot.level}</span>
-      </div>
-      <div className="tile-main">
-        <span className="tile-icon">{icon}</span>
-        <div className="tile-yield">
-          <div>Выход: ×{slot.baseYield * slot.level} {yieldText}</div>
-          <div style={{ fontSize: 11, color: '#9ca3af' }}>
-            До след. уровня: {harvestsSinceLevel}/5 сборов
+      <div className={`tile-inner ${showHint ? 'is-flipped' : ''}`}>
+        {/* Передняя сторона — исходная карточка, как на скрине */}
+        <div className="tile-face tile-face-front">
+          <div className="tile-header">
+            <span className="tile-name">
+              {title}
+            </span>
+            <span className="tile-level">Ур. {slot.level}</span>
           </div>
-          {slot.timer && (
-            <div className="tile-timer">
-              {ready ? 'Готово к сбору' : `Осталось: ${formatTimer(remaining)}`}
-              <div className="progress-bar">
-                <div className="progress-fill" style={{ width: `${progress * 100}%` }} />
+          <div className="tile-main">
+            <span className="tile-icon">{icon}</span>
+            <div className="tile-yield">
+              <div>Выход: ×{slot.baseYield * slot.level} {yieldText}</div>
+              <div style={{ fontSize: 11, color: '#9ca3af' }}>
+                До след. уровня: {harvestsSinceLevel}/5 сборов
               </div>
+              {slot.timer && (
+                <div className="tile-timer">
+                  {ready ? 'Готово к сбору' : `Осталось: ${formatTimer(remaining)}`}
+                  <div className="progress-bar">
+                    <div className="progress-fill" style={{ width: `${progress * 100}%` }} />
+                  </div>
+                </div>
+              )}
+              {!slot.timer && <div className="tile-timer">Ожидает действия</div>}
             </div>
-          )}
-          {!slot.timer && <div className="tile-timer">Ожидает действия</div>}
+          </div>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            <button
+              className="btn btn-secondary"
+              type="button"
+              onClick={onAction}
+              style={{ flex: 1 }}
+            >
+              {actionLabel}
+            </button>
+            {showBoost && (
+              <button
+                className="btn btn-primary"
+                type="button"
+                onClick={onBoost}
+                disabled={!canBoost}
+                style={{ fontSize: 10, padding: '6px 8px' }}
+                title={canBoost ? `Ускорить за ${boostCost} 💎` : 'Не хватает гемов'}
+              >
+                ⚡ {boostCost}💎
+              </button>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+            {maxGemUpgradeLevel > 0 && (
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={onGemUpgrade}
+                disabled={!canGemUpgrade || gemUpgradeLevel >= maxGemUpgradeLevel}
+                style={{ fontSize: 10, opacity: canGemUpgrade && gemUpgradeLevel < maxGemUpgradeLevel ? 1 : 0.5 }}
+              >
+                💎 Ур.{gemUpgradeLevel}/{maxGemUpgradeLevel} — {kind === 'crop' ? 20 : slot.type === 'cow' ? 30 : slot.type === 'chicken' ? 20 : 60} 💎
+              </button>
+            )}
+            {maxGemUpgradeLevel > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowHint(true)}
+                style={{
+                  fontSize: 10,
+                  color: '#9ca3af',
+                  marginLeft: 4,
+                  alignSelf: 'center',
+                  width: 20,
+                  height: 20,
+                  minWidth: 20,
+                  padding: 0,
+                  borderRadius: '50%',
+                  border: '1px solid rgba(148,163,184,0.5)',
+                  background: 'rgba(15,23,42,0.8)',
+                  cursor: 'pointer',
+                  lineHeight: 1,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+                title="Подсказка"
+              >
+                ?
+              </button>
+            )}
+          </div>
         </div>
-      </div>
-      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-        <button
-          className="btn btn-secondary"
-          type="button"
-          onClick={onAction}
-          style={{ flex: 1 }}
-        >
-          {actionLabel}
-        </button>
-        {showBoost && (
-          <button
-            className="btn btn-primary"
-            type="button"
-            onClick={onBoost}
-            disabled={!canBoost}
-            style={{ fontSize: 10, padding: '6px 8px' }}
-            title={canBoost ? `Ускорить за ${boostCost} 💎` : 'Не хватает гемов'}
-          >
-            ⚡ {boostCost}💎
-          </button>
-        )}
-      </div>
-      <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
-        {maxGemUpgradeLevel > 0 && (
-          <button
-            className="btn btn-secondary"
-            type="button"
-            onClick={onGemUpgrade}
-            disabled={!canGemUpgrade || gemUpgradeLevel >= maxGemUpgradeLevel}
-            style={{ fontSize: 10, opacity: canGemUpgrade && gemUpgradeLevel < maxGemUpgradeLevel ? 1 : 0.5 }}
-          >
-            💎 Ур.{gemUpgradeLevel}/{maxGemUpgradeLevel} — {kind === 'crop' ? 20 : slot.type === 'cow' ? 30 : slot.type === 'chicken' ? 20 : 60} 💎
-          </button>
-        )}
-        {maxGemUpgradeLevel > 0 && (
-          <button
-            type="button"
-            onClick={() => setShowHint((s) => !s)}
-            style={{
-              fontSize: 10,
-              color: '#9ca3af',
-              marginLeft: 4,
-              alignSelf: 'center',
-              width: 20,
-              height: 20,
-              minWidth: 20,
-              padding: 0,
-              borderRadius: '50%',
-              border: '1px solid rgba(148,163,184,0.5)',
-              background: 'rgba(15,23,42,0.8)',
-              cursor: 'pointer',
-              lineHeight: 1,
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}
-            title="Подсказка"
-          >
-            ?
-          </button>
-        )}
-        {showHint && (
+
+        {/* Обратная сторона — синий фон + текст подсказки и стрелка назад */}
+        <div className="tile-face tile-face-back">
           <div
             style={{
-              marginTop: 6,
-              padding: '6px 8px',
-              fontSize: 10,
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'center',
+              alignItems: 'center',
+              textAlign: 'center',
+              fontSize: 11,
               color: '#e2e8f0',
-              background: 'rgba(15,23,42,0.95)',
-              border: '1px solid rgba(148,163,184,0.4)',
-              borderRadius: 8,
-              width: '100%',
-              boxSizing: 'border-box'
+              padding: '0 8px'
             }}
           >
-            {hintText}
+            <div>{hintText}</div>
           </div>
-        )}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0 6px 6px' }}>
+            <button
+              type="button"
+              onClick={() => setShowHint(false)}
+              style={{
+                fontSize: 10,
+                color: '#9ca3af',
+                width: 22,
+                height: 22,
+                minWidth: 22,
+                padding: 0,
+                borderRadius: '50%',
+                border: '1px solid rgba(148,163,184,0.5)',
+                background: 'rgba(15,23,42,0.9)',
+                cursor: 'pointer',
+                lineHeight: 1,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+              title="Назад"
+            >
+              ↩
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -309,18 +341,6 @@ export const App: React.FC = () => {
     }
   });
   const [state, setState] = useState<GameState>(() => createInitialState());
-  useEffect(() => {
-    const uid = telegramCtx.userId;
-    if (!uid) return;
-    try {
-      const raw = window.localStorage.getItem(getStateStorageKey(uid));
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as GameState;
-      setState(ensureExtendedState(parsed));
-    } catch {
-      // ignore
-    }
-  }, [telegramCtx.userId]);
   const [tab, setTab] = useState<TabId>('fields');
   const [isAdmin] = useState<boolean>(() => {
     try {
@@ -339,22 +359,31 @@ export const App: React.FC = () => {
   const [adminRewardAmount, setAdminRewardAmount] = useState('');
   const [adminRewardResource, setAdminRewardResource] = useState<'gems' | 'coins'>('gems');
   const [adminRewardStatus, setAdminRewardStatus] = useState<string | null>(null);
-  const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-  // Единственная синхронизация: GET /api/me → setState. Оплата напрямую связана с gems на бэкенде; фронт отражает это только через refetch.
+  // Ref, который всегда хранит последнее актуальное состояние (для sendBeacon и периодической синхронизации).
+  const latestStateRef = useRef<GameState>(state);
+  useEffect(() => { latestStateRef.current = state; }, [state]);
+
+  // Флаг «есть несохранённые изменения» — ставится при каждом действии, снимается после успешного syncFarm.
+  const dirtyRef = useRef(false);
+
+  // Синхронизация с сервером: GET /api/me.
+  // Истина для состояния фермы — сервер, потому что все действия отправляют актуальное состояние через /api/farm/sync.
   const syncGameState = useCallback(() => {
     if (!API_BASE || !telegramCtx.userId) return;
     getMe(telegramCtx.userId).then((data) => {
       try {
         if (!data || data.level === undefined) return;
         const base = createInitialState();
+        const serverRevision = (data as any).revision as number | undefined;
         const next = ensureExtendedState({
           ...base,
           level: data.level,
           resources: data.resources != null ? data.resources : base.resources,
           crops: Array.isArray(data.crops) ? data.crops : base.crops,
           animals: Array.isArray(data.animals) ? data.animals : base.animals,
+          revision: typeof serverRevision === 'number' ? serverRevision : base.revision,
           referrerId: data.referrerId ?? undefined,
           referrerUsername: data.referrerUsername ?? undefined
         });
@@ -366,6 +395,53 @@ export const App: React.FC = () => {
   }, [telegramCtx.userId]);
 
   const refreshFarmState = syncGameState;
+
+  // Гарантированная отправка состояния через sendBeacon (переживает закрытие страницы).
+  const flushStateBeacon = useCallback(() => {
+    if (!API_BASE || !telegramCtx.userId) return;
+    const s = latestStateRef.current;
+    if (!s) return;
+    try {
+      const payload = JSON.stringify({
+        userId: telegramCtx.userId,
+        state: s,
+        username: telegramCtx.username ?? undefined
+      });
+      navigator.sendBeacon(`${API_BASE}/api/farm/sync`, new Blob([payload], { type: 'application/json' }));
+    } catch {
+      // не все браузеры поддерживают sendBeacon, но Telegram WebView поддерживает
+    }
+  }, [API_BASE, telegramCtx.userId, telegramCtx.username]);
+
+  // При уходе со страницы / закрытии мини-аппа гарантированно отправляем последнее состояние.
+  useEffect(() => {
+    const onUnload = () => flushStateBeacon();
+    window.addEventListener('pagehide', onUnload);
+    window.addEventListener('beforeunload', onUnload);
+    const onVisHidden = () => {
+      if (document.visibilityState === 'hidden') flushStateBeacon();
+    };
+    document.addEventListener('visibilitychange', onVisHidden);
+    return () => {
+      window.removeEventListener('pagehide', onUnload);
+      window.removeEventListener('beforeunload', onUnload);
+      document.removeEventListener('visibilitychange', onVisHidden);
+    };
+  }, [flushStateBeacon]);
+
+  // Периодическая страховочная синхронизация: если есть несохранённые изменения, отправляем на сервер каждые 5 секунд.
+  useEffect(() => {
+    if (!API_BASE || !telegramCtx.userId) return;
+    const id = setInterval(() => {
+      if (dirtyRef.current) {
+        const s = latestStateRef.current;
+        syncFarm(telegramCtx.userId, s, telegramCtx.username).then(() => {
+          dirtyRef.current = false;
+        }).catch(() => {});
+      }
+    }, 5000);
+    return () => clearInterval(id);
+  }, [API_BASE, telegramCtx.userId, telegramCtx.username]);
 
   type AchievementsState = {
     plantHarvests: number;
@@ -423,6 +499,16 @@ export const App: React.FC = () => {
     }
   };
 
+  // Чтобы клики по «Собрать» не лагали из-за синхронной записи в localStorage,
+  // сохраняем достижения и weekly-статистику в эффектах после рендера.
+  useEffect(() => {
+    persistAchievements(achievements, telegramCtx.userId);
+  }, [achievements, telegramCtx.userId]);
+
+  useEffect(() => {
+    persistWeekly(weekly, telegramCtx.userId);
+  }, [weekly, telegramCtx.userId]);
+
   // Подгружаем пакеты гемов с бэкенда; при ошибке остаётся дефолтный список (GEM_PACKAGES).
   useEffect(() => {
     getGemPackages().then((list) => list.length > 0 && setGemPackages(list)).catch(() => {});
@@ -431,7 +517,6 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (telegramCtx.isTelegram && tab === 'referrals' && API_BASE && telegramCtx.userId) {
       getReferralStats(telegramCtx.userId).then(setReferralStats);
-      syncGameState();
     }
     if (telegramCtx.isTelegram && tab === 'stats' && API_BASE) {
       getGlobalStats().then(setGlobalStats);
@@ -440,18 +525,26 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     persistState(state, telegramCtx.userId);
-    if (API_BASE && telegramCtx.userId && telegramCtx.isTelegram) {
-      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-      syncTimeoutRef.current = setTimeout(() => {
-        syncFarm(telegramCtx.userId, state, telegramCtx.username).then(() => {
-          syncTimeoutRef.current = null;
-        });
-      }, 800);
+  }, [state, telegramCtx.userId]);
+
+  // При наличии сервера всегда подтягиваем состояние с него при старте.
+  // localStorage используется только как запасной вариант, если API недоступен.
+  useEffect(() => {
+    const uid = telegramCtx.userId;
+    if (!uid) return;
+    if (API_BASE) {
+      syncGameState();
+      return;
     }
-    return () => {
-      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-    };
-  }, [state, telegramCtx.userId, telegramCtx.isTelegram]);
+    try {
+      const raw = window.localStorage.getItem(getStateStorageKey(uid));
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as GameState;
+      setState(ensureExtendedState(parsed));
+    } catch {
+      // ignore
+    }
+  }, [telegramCtx.userId, syncGameState]);
 
   useEffect(() => {
     notifyTelegramReady();
@@ -463,7 +556,6 @@ export const App: React.FC = () => {
     }
 
     if (telegramCtx.isTelegram && API_BASE && telegramCtx.userId) {
-      syncGameState();
       getReferralStats(telegramCtx.userId).then(setReferralStats).catch(() => {});
       getGemPackages().then(setGemPackages).catch(() => {});
     }
@@ -531,68 +623,87 @@ export const App: React.FC = () => {
     };
   }, [API_BASE, telegramCtx.userId, syncGameState]);
 
+  // Обёртка: применяем изменение состояния, увеличиваем ревизию и сразу отправляем на сервер.
+  // Если syncFarm не успеет — страховка: sendBeacon при закрытии и периодический sync каждые 5 сек.
+  const applyStateUpdate = useCallback(
+    (updater: (prev: GameState) => GameState) => {
+      setState((prev) => {
+        const current = prev ?? createInitialState();
+        const updated = updater(current);
+        const nextRevision = (current.revision ?? 0) + 1;
+        const next: GameState = { ...updated, revision: nextRevision };
+        // Помечаем, что есть несохранённые изменения.
+        dirtyRef.current = true;
+        // Синхронизируемся с бэкендом.
+        if (API_BASE && telegramCtx.userId) {
+          syncFarm(telegramCtx.userId, next, telegramCtx.username)
+            .then(() => { dirtyRef.current = false; })
+            .catch(() => {});
+        }
+        return next;
+      });
+    },
+    [API_BASE, telegramCtx.userId, telegramCtx.username]
+  );
+
   const handlePlant = (id: string) => {
-    setState((prev) => plantCrop(prev, id));
+    applyStateUpdate((prev) => plantCrop(prev, id));
   };
 
   const handleFeed = (id: string) => {
-    setState((prev) => feedAnimal(prev, id));
-    setAchievements((prev) => {
-      const next = { ...prev, animalFeeds: prev.animalFeeds + 1 };
-      persistAchievements(next, telegramCtx.userId);
-      return next;
-    });
+    applyStateUpdate((prev) => feedAnimal(prev, id));
+    setAchievements((prev) => ({
+      ...prev,
+      animalFeeds: prev.animalFeeds + 1
+    }));
   };
 
   const handleHarvestCrop = (id: string) => {
-    setState((prev) => harvestCrop(prev, id));
-    setAchievements((prev) => {
-      const next = { ...prev, plantHarvests: prev.plantHarvests + 1 };
-      persistAchievements(next, telegramCtx.userId);
-      return next;
-    });
-    setWeekly((w) => {
-      const next = { ...w, harvestsThisWeek: w.harvestsThisWeek + 1 };
-      persistWeekly(next, telegramCtx.userId);
-      return next;
-    });
+    applyStateUpdate((prev) => harvestCrop(prev, id));
+    setAchievements((prev) => ({
+      ...prev,
+      plantHarvests: prev.plantHarvests + 1
+    }));
+    setWeekly((w) => ({
+      ...w,
+      harvestsThisWeek: w.harvestsThisWeek + 1
+    }));
   };
 
   const handleCollectProduct = (id: string) => {
-    setState((prev) => collectAnimalProduct(prev, id));
+    applyStateUpdate((prev) => collectAnimalProduct(prev, id));
   };
 
   const handleSell = () => {
-    setState((prev) => {
+    applyStateUpdate((prev) => {
       const next = sellProduce(prev);
       const income = next.resources.coins - (prev.resources?.coins ?? 0);
-      setWeekly((w) => {
-        const n = { ...w, coinsEarnedThisWeek: w.coinsEarnedThisWeek + income };
-        persistWeekly(n, telegramCtx.userId);
-        return n;
-      });
+      setWeekly((w) => ({
+        ...w,
+        coinsEarnedThisWeek: w.coinsEarnedThisWeek + income
+      }));
       return next;
     });
   };
 
   const handleBuyFeed = () => {
-    setState((prev) => buyFeed(prev));
+    applyStateUpdate((prev) => buyFeed(prev));
   };
 
   const handleBoostCrop = (id: string) => {
-    setState((prev) => boostCrop(prev, id));
+    applyStateUpdate((prev) => boostCrop(prev, id));
   };
 
   const handleBoostAnimal = (id: string) => {
-    setState((prev) => boostAnimal(prev, id));
+    applyStateUpdate((prev) => boostAnimal(prev, id));
   };
 
   const handleUpgradeCrop = (id: string) => {
-    setState((prev) => upgradeCrop(prev, id));
+    applyStateUpdate((prev) => upgradeCrop(prev, id));
   };
 
   const handleUpgradeAnimal = (id: string) => {
-    setState((prev) => upgradeAnimal(prev, id));
+    applyStateUpdate((prev) => upgradeAnimal(prev, id));
   };
 
   const handleDailyClaim = async () => {
@@ -612,7 +723,7 @@ export const App: React.FC = () => {
       if (result.reward.gems) parts.push(`${result.reward.gems} гемов`);
       if (result.reward.feed) parts.push(`${result.reward.feed} корма`);
       setDailyMessage(`Награда: ${parts.join(', ')}. Марафон: день ${result.streak ?? 1} из 5.`);
-      setState((prev) => ({
+      applyStateUpdate((prev) => ({
         ...prev,
         resources: { ...prev.resources, ...result.resources }
       }));
@@ -694,7 +805,7 @@ export const App: React.FC = () => {
   };
 
   const handleUnlockCrop = (id: string) => {
-    setState((prev) => {
+    applyStateUpdate((prev) => {
       const slot = prev.crops.find((c) => c.id === id);
       if (!slot || slot.unlocked) return prev;
       if (prev.resources.gems < 30) return prev;
@@ -711,7 +822,7 @@ export const App: React.FC = () => {
   };
 
   const handleUnlockAnimal = (id: string) => {
-    setState((prev) => {
+    applyStateUpdate((prev) => {
       const slot = prev.animals.find((a) => a.id === id);
       if (!slot || slot.unlocked) return prev;
       if (prev.resources.gems < 30) return prev;
@@ -758,7 +869,7 @@ export const App: React.FC = () => {
   };
 
   const handleGemUpgradeCrop = (id: string) => {
-    setState((prev) => {
+    applyStateUpdate((prev) => {
       const crops = prev.crops.map((c) => {
         if (c.id !== id) return c;
         const current = c.gemUpgradeLevel ?? 0;
@@ -778,7 +889,7 @@ export const App: React.FC = () => {
   };
 
   const handleGemUpgradeAnimal = (id: string) => {
-    setState((prev) => {
+    applyStateUpdate((prev) => {
       const animals = prev.animals.map((a) => {
         if (a.id !== id) return a;
         const current = a.gemUpgradeLevel ?? 0;
@@ -1021,7 +1132,7 @@ export const App: React.FC = () => {
 
   const handleClaimWeeklyReward = () => {
     if (!canClaimWeekly) return;
-    setState((prev) => ({
+    applyStateUpdate((prev) => ({
       ...prev,
       resources: {
         ...prev.resources,
@@ -1029,25 +1140,23 @@ export const App: React.FC = () => {
       }
     }));
     const reset = { harvestsThisWeek: 0, coinsEarnedThisWeek: 0 };
-    persistWeekly(reset, telegramCtx.userId);
     setWeekly(reset);
   };
 
   const handleClaimAchievementReward = () => {
     if (!canClaimAchievement) return;
     const rewardCoins = 100;
-    setState((prev) => ({
+    applyStateUpdate((prev) => ({
       ...prev,
       resources: {
         ...prev.resources,
         coins: (prev.resources.coins ?? 0) + rewardCoins
       }
     }));
-    setAchievements((prev) => {
-      const next = { ...prev, rewardClaimed: true };
-      persistAchievements(next, telegramCtx.userId);
-      return next;
-    });
+    setAchievements((prev) => ({
+      ...prev,
+      rewardClaimed: true
+    }));
   };
 
   if (telegramCtx.userId === 'DEMO_USER') {
@@ -1630,49 +1739,139 @@ export const App: React.FC = () => {
               </div>
             )}
             {isAdmin && API_BASE && telegramCtx.userId && (
-              <div style={{ marginBottom: 8 }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={async () => {
-                    const show = (msg: string) => {
-                      if (typeof (window as any).Telegram?.WebApp?.showAlert === 'function') {
-                        (window as any).Telegram.WebApp.showAlert(msg);
-                      } else {
-                        alert(msg);
-                      }
-                    };
-                    const uiGems = state.resources.gems ?? 0;
-                    let msg = `userId: ${telegramCtx.userId}\nAPI: ${API_BASE}\nUI gems: ${uiGems}\n`;
-                    try {
-                      const healthRes = await fetch(`${API_BASE}/health`, { credentials: 'include' });
-                      msg += `health: ${healthRes.status}\n`;
-                      if (!healthRes.ok) {
+              <>
+                <div style={{ marginBottom: 8 }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={async () => {
+                      const show = (msg: string) => {
+                        if (typeof (window as any).Telegram?.WebApp?.showAlert === 'function') {
+                          (window as any).Telegram.WebApp.showAlert(msg);
+                        } else {
+                          alert(msg);
+                        }
+                      };
+                      const uiGems = state.resources.gems ?? 0;
+                      let msg = `ОПЛАТА\nuserId: ${telegramCtx.userId}\nAPI: ${API_BASE}\nUI gems: ${uiGems}\n`;
+                      try {
+                        const healthRes = await fetch(`${API_BASE}/health`, { credentials: 'include' });
+                        msg += `health: ${healthRes.status}\n`;
+                        if (!healthRes.ok) {
+                          show(msg);
+                          return;
+                        }
+                        const meRes = await fetch(
+                          `${API_BASE}/api/me?userId=${encodeURIComponent(telegramCtx.userId!)}`,
+                          { credentials: 'include' }
+                        );
+                        msg += `api/me: ${meRes.status}\n`;
+                        if (!meRes.ok) {
+                          show(msg);
+                          return;
+                        }
+                        const data = await meRes.json();
+                        const serverGems = data?.resources?.gems ?? 0;
+                        msg += `server gems: ${serverGems}\n`;
                         show(msg);
-                        return;
-                      }
-                      const meRes = await fetch(`${API_BASE}/api/me?userId=${encodeURIComponent(telegramCtx.userId!)}`, {
-                        credentials: 'include'
-                      });
-                      msg += `api/me: ${meRes.status}\n`;
-                      if (!meRes.ok) {
+                      } catch (e: any) {
+                        msg += `error: ${e?.message || String(e)}`;
                         show(msg);
-                        return;
                       }
-                      const data = await meRes.json();
-                      const serverGems = data?.resources?.gems ?? 0;
-                      msg += `server gems: ${serverGems}\n`;
-                      show(msg);
-                    } catch (e: any) {
-                      msg += `error: ${e?.message || String(e)}`;
-                      show(msg);
-                    }
-                  }}
-                  style={{ fontSize: 12 }}
-                >
-                  Диагностика оплаты (admin)
-                </button>
-              </div>
+                    }}
+                    style={{ fontSize: 12, marginBottom: 4 }}
+                  >
+                    Диагностика оплаты (admin)
+                  </button>
+                </div>
+                <div style={{ marginBottom: 8 }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={async () => {
+                      const show = (msg: string) => {
+                        if (typeof (window as any).Telegram?.WebApp?.showAlert === 'function') {
+                          (window as any).Telegram.WebApp.showAlert(msg);
+                        } else {
+                          alert(msg);
+                        }
+                      };
+                      const r = state.resources;
+                      let msg = `ПРОГРЕСС (монеты/урожай)\nuserId: ${telegramCtx.userId}\nAPI: ${API_BASE}\n`;
+                      msg += `UI coins: ${r.coins ?? 0}\n`;
+                      msg += `UI tomato: ${r.tomato ?? 0}, cucumber: ${r.cucumber ?? 0}, corn: ${r.corn ?? 0}, watermelon: ${r.watermelon ?? 0}, apple: ${r.apple ?? 0}\n`;
+                      msg += `UI milk: ${r.milk ?? 0}, egg: ${r.egg ?? 0}, cheese: ${r.cheese ?? 0}, meat: ${r.meat ?? 0}, feathers: ${r.feathers ?? 0}, wool: ${r.wool ?? 0}\n`;
+                      try {
+                        // 1) Отправляем текущее состояние на сервер.
+                        const syncRes = await fetch(`${API_BASE}/api/farm/sync`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          credentials: 'include',
+                          body: JSON.stringify({
+                            userId: telegramCtx.userId,
+                            state,
+                            username: telegramCtx.username ?? undefined
+                          })
+                        });
+                        msg += `sync status: ${syncRes.status}\n`;
+                        // 2) Сразу читаем состояние с сервера.
+                        const meRes = await fetch(
+                          `${API_BASE}/api/me?userId=${encodeURIComponent(telegramCtx.userId!)}`,
+                          { credentials: 'include' }
+                        );
+                        msg += `api/me: ${meRes.status}\n`;
+                        if (!meRes.ok) {
+                          show(msg);
+                          return;
+                        }
+                        const data = await meRes.json();
+                        const sr = data?.resources || {};
+                        msg += `SERVER coins: ${sr.coins ?? 0}\n`;
+                        const fields = [
+                          'tomato',
+                          'cucumber',
+                          'corn',
+                          'watermelon',
+                          'apple',
+                          'milk',
+                          'egg',
+                          'cheese',
+                          'meat',
+                          'feathers',
+                          'wool'
+                        ] as const;
+                        let anyMismatch = false;
+                        for (const key of fields) {
+                          const uiVal = (r as any)[key] ?? 0;
+                          const srvVal = (sr as any)[key] ?? 0;
+                          if (uiVal !== srvVal) {
+                            anyMismatch = true;
+                            msg += `MISMATCH ${key}: ui=${uiVal}, server=${srvVal}\n`;
+                          }
+                        }
+                        const cropsEqual =
+                          JSON.stringify(state.crops) === JSON.stringify(data?.crops ?? []);
+                        const animalsEqual =
+                          JSON.stringify(state.animals) === JSON.stringify(data?.animals ?? []);
+                        msg += `crops equal: ${cropsEqual}\n`;
+                        msg += `animals equal: ${animalsEqual}\n`;
+                        if (anyMismatch || !cropsEqual || !animalsEqual) {
+                          msg += '⚠️ Серверные данные отличаются от UI — проблема сохранения прогресса.\n';
+                        } else {
+                          msg += 'Ресурсы и слоты совпадают — проблема, скорее всего, в другом месте UI.\n';
+                        }
+                        show(msg);
+                      } catch (e: any) {
+                        msg += `error: ${e?.message || String(e)}`;
+                        show(msg);
+                      }
+                    }}
+                    style={{ fontSize: 12 }}
+                  >
+                    Диагностика прогресса (admin)
+                  </button>
+                </div>
+              </>
             )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {gemPackages.map((pkg) => (

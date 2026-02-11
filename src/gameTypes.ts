@@ -52,6 +52,12 @@ export interface GameState {
   resources: Resources;
   crops: CropSlot[];
   animals: AnimalSlot[];
+  /** Ревизия состояния, увеличивается при каждом изменении на клиенте (для защиты от отката старым клиентом). */
+  revision?: number;
+  /** Кто пригласил (userId), заполняется с сервера */
+  referrerId?: string | null;
+  /** Ник пригласившего (@username), заполняется с сервера */
+  referrerUsername?: string | null;
 }
 
 export type TabId = 'fields' | 'animals' | 'market' | 'referrals' | 'shop' | 'stats';

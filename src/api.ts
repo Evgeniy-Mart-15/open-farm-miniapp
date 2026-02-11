@@ -9,6 +9,7 @@ export interface MeResponse {
   resources: GameState['resources'];
   crops: GameState['crops'];
   animals: GameState['animals'];
+  revision?: number;
   referrerId?: string | null;
   referrerUsername?: string | null;
   username?: string | null;

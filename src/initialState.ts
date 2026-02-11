@@ -19,6 +19,7 @@ export function createInitialState(): GameState {
   ];
   return {
     level: 1,
+    revision: 0,
     resources: {
       coins: 100,
       gems: 5,
