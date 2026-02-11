@@ -368,12 +368,20 @@ export const App: React.FC = () => {
   // Флаг «есть несохранённые изменения» — ставится при каждом действии, снимается после успешного syncFarm.
   const dirtyRef = useRef(false);
 
+  // Ref для debounce таймера синхронизации.
+  const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Синхронизация с сервером: GET /api/me.
-  // Истина для состояния фермы — сервер, потому что все действия отправляют актуальное состояние через /api/farm/sync.
+  // ВАЖНО: если есть несохранённые локальные изменения (dirtyRef), НЕ перезаписываем state,
+  // чтобы не затереть свежие локальные данные старыми серверными.
   const syncGameState = useCallback(() => {
     if (!API_BASE || !telegramCtx.userId) return;
+    // Не затираем несохранённые локальные изменения серверными данными.
+    if (dirtyRef.current) return;
     getMe(telegramCtx.userId).then((data) => {
       try {
+        // Повторная проверка: пока GET шёл, пользователь мог что-то сделать.
+        if (dirtyRef.current) return;
         if (!data || data.level === undefined) return;
         const base = createInitialState();
         const serverRevision = (data as any).revision as number | undefined;
@@ -393,8 +401,6 @@ export const App: React.FC = () => {
       }
     }).catch(() => {});
   }, [telegramCtx.userId]);
-
-  const refreshFarmState = syncGameState;
 
   // Гарантированная отправка состояния через sendBeacon (переживает закрытие страницы).
   const flushStateBeacon = useCallback(() => {
@@ -572,26 +578,64 @@ export const App: React.FC = () => {
     }
   }, [telegramCtx.userId]);
 
-  // При открытии вкладки «Магазин» подтягиваем баланс с сервера, чтобы гемы (Премиум) были актуальны после покупки в боте или в мини-аппе.
+  // Принудительная загрузка состояния с сервера (для оплаты и вкладки «Магазин»).
+  // Сначала отправляет несохранённые локальные изменения, затем загружает серверные данные.
+  const forceRefreshFromServer = useCallback(() => {
+    if (!API_BASE || !telegramCtx.userId) return;
+    const doLoad = () => {
+      getMe(telegramCtx.userId).then((data) => {
+        try {
+          if (dirtyRef.current) return; // пока грузили, пользователь снова что-то сделал
+          if (!data || data.level === undefined) return;
+          const base = createInitialState();
+          const serverRevision = (data as any).revision as number | undefined;
+          const next = ensureExtendedState({
+            ...base,
+            level: data.level,
+            resources: data.resources != null ? data.resources : base.resources,
+            crops: Array.isArray(data.crops) ? data.crops : base.crops,
+            animals: Array.isArray(data.animals) ? data.animals : base.animals,
+            revision: typeof serverRevision === 'number' ? serverRevision : base.revision,
+            referrerId: data.referrerId ?? undefined,
+            referrerUsername: data.referrerUsername ?? undefined
+          });
+          setState(next);
+        } catch (_) { /* ignore */ }
+      }).catch(() => {});
+    };
+    if (dirtyRef.current) {
+      // Сначала отправляем несохранённые изменения, потом загружаем.
+      syncFarm(telegramCtx.userId, latestStateRef.current, telegramCtx.username)
+        .then(() => { dirtyRef.current = false; doLoad(); })
+        .catch(() => doLoad());
+    } else {
+      doLoad();
+    }
+  }, [telegramCtx.userId, telegramCtx.username]);
+
+  // Алиас для обратной совместимости (используется в handleBuyGems, handleBuyCustomGems и т.д.)
+  const refreshFarmState = forceRefreshFromServer;
+
+  // При открытии вкладки «Магазин» подтягиваем баланс с сервера (безопасно — forceRefresh сначала сохранит локальные).
   useEffect(() => {
     if (tab !== 'shop' || !API_BASE || !telegramCtx.userId) return;
-    refreshFarmState();
-  }, [tab, API_BASE, telegramCtx.userId, refreshFarmState]);
+    forceRefreshFromServer();
+  }, [tab, API_BASE, telegramCtx.userId, forceRefreshFromServer]);
 
   // На вкладке «Магазин» периодически подтягиваем баланс (💎 Гемы), чтобы после оплаты в боте или в mini-app счётчик обновился.
   useEffect(() => {
     if (tab !== 'shop' || !API_BASE || !telegramCtx.userId) return;
-    const id = setInterval(refreshFarmState, 5000);
+    const id = setInterval(forceRefreshFromServer, 5000);
     return () => clearInterval(id);
-  }, [tab, API_BASE, telegramCtx.userId, refreshFarmState]);
+  }, [tab, API_BASE, telegramCtx.userId, forceRefreshFromServer]);
 
-  // При возврате в мини-ап (после оплаты) подтягиваем баланс: сразу и с задержками (сервер может обработать платёж не сразу).
+  // При возврате в мини-ап (после оплаты) подтягиваем баланс: безопасно через forceRefresh.
   useEffect(() => {
     if (!API_BASE || !telegramCtx.userId || !telegramCtx.isTelegram) return;
     const scheduleRefreshes = () => {
-      refreshFarmState();
-      refreshTimersRef.current.push(setTimeout(refreshFarmState, 1000));
-      refreshTimersRef.current.push(setTimeout(refreshFarmState, 3000));
+      forceRefreshFromServer();
+      refreshTimersRef.current.push(setTimeout(forceRefreshFromServer, 1000));
+      refreshTimersRef.current.push(setTimeout(forceRefreshFromServer, 3000));
     };
     let hidden = document.visibilityState === 'hidden';
     const onVisibility = () => {
@@ -606,25 +650,29 @@ export const App: React.FC = () => {
       refreshTimersRef.current.forEach(clearTimeout);
       refreshTimersRef.current = [];
     };
-  }, [API_BASE, telegramCtx.userId, telegramCtx.isTelegram, refreshFarmState]);
+  }, [API_BASE, telegramCtx.userId, telegramCtx.isTelegram, forceRefreshFromServer]);
 
-  // СВЯЗЬ ОПЛАТЫ И GEMS: invoiceClosed(paid) → getMe() → setState. Gems уже изменены сервером. Никакого setGems(gems+N), только server truth.
+  // СВЯЗЬ ОПЛАТЫ И GEMS: invoiceClosed(paid) → forceRefresh → setState. Gems уже изменены сервером.
   useEffect(() => {
     const tg = getTelegramWebApp();
     if (!tg?.onEvent || !API_BASE || !telegramCtx.userId) return;
     const handler = (event: { status?: string }) => {
       if (event?.status === 'paid' || event?.status === 'completed') {
-        syncGameState();
+        forceRefreshFromServer();
       }
     };
     tg.onEvent('invoiceClosed', handler);
     return () => {
       if (tg.offEvent) tg.offEvent('invoiceClosed', handler);
     };
-  }, [API_BASE, telegramCtx.userId, syncGameState]);
+  }, [API_BASE, telegramCtx.userId, forceRefreshFromServer]);
 
-  // Обёртка: применяем изменение состояния, увеличиваем ревизию и сразу отправляем на сервер.
-  // Если syncFarm не успеет — страховка: sendBeacon при закрытии и периодический sync каждые 5 сек.
+  // Обёртка: применяем изменение состояния и увеличиваем ревизию.
+  // Синхронизация с сервером происходит через debounced setTimeout (50 мс) ПОСЛЕ setState.
+  // Это гарантирует, что:
+  // 1) syncFarm вызывается ВНЕ setState (не антипаттерн React).
+  // 2) При нескольких быстрых действиях подряд отправляется только последнее состояние.
+  // 3) latestStateRef всегда содержит самое свежее состояние.
   const applyStateUpdate = useCallback(
     (updater: (prev: GameState) => GameState) => {
       setState((prev) => {
@@ -632,18 +680,22 @@ export const App: React.FC = () => {
         const updated = updater(current);
         const nextRevision = (current.revision ?? 0) + 1;
         const next: GameState = { ...updated, revision: nextRevision };
-        // Помечаем, что есть несохранённые изменения.
         dirtyRef.current = true;
-        // Синхронизируемся с бэкендом.
-        if (API_BASE && telegramCtx.userId) {
-          syncFarm(telegramCtx.userId, next, telegramCtx.username)
-            .then(() => { dirtyRef.current = false; })
-            .catch(() => {});
-        }
+        // Немедленно обновляем ref — для sendBeacon и для setTimeout ниже.
+        latestStateRef.current = next;
         return next;
       });
+      // Планируем отправку на сервер СНАРУЖИ setState.
+      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+      syncTimeoutRef.current = setTimeout(() => {
+        if (!API_BASE || !telegramCtx.userId || !dirtyRef.current) return;
+        const stateToSync = latestStateRef.current;
+        syncFarm(telegramCtx.userId, stateToSync, telegramCtx.username)
+          .then(() => { dirtyRef.current = false; })
+          .catch(() => { /* периодический sync и sendBeacon подхватят */ });
+      }, 50);
     },
-    [API_BASE, telegramCtx.userId, telegramCtx.username]
+    [telegramCtx.userId, telegramCtx.username]
   );
 
   const handlePlant = (id: string) => {
